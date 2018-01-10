@@ -1911,7 +1911,9 @@
         param(
             [Parameter(Mandatory=$false, HelpMessage = 'Zerto Server or ENV:\ZertoServer')] [string] $ZertoServer = ( Get-EnvZertoServer ) ,
             [Parameter(Mandatory=$false, HelpMessage = 'Zerto Server URL Port')] [string] $ZertoPort = ( Get-EnvZertoPort ),
-            [Parameter( HelpMessage  = 'User to connect to Zerto')] [string] $ZertoUser
+            [Parameter( HelpMessage  = 'User name to connect to Zerto', ParameterSetName="ByUserName")] [string] $ZertoUser,
+            ## PSCredential to use for connecting to Zerto ZVM
+            [Parameter( HelpMessage  = 'User credentials to connect to Zerto', ParameterSetName="ByCredential")][System.Management.Automation.PSCredential]$Credential
         )
         
         Set-SSLCertByPass
@@ -1925,11 +1927,21 @@
         $TypeJSON = "application/json"
         Write-Verbose $FullURL
 
-        if ([String]::IsNullOrEmpty($ZertoUser) ) {
-            $cred = Get-Credential -Message "Enter your Zerto credentials for '$ZertoServer'"
-        } else {
-            $cred = Get-Credential -Message "Enter your Zerto credentials for '$ZertoServer'" -UserName $ZertoUser
-        }
+        ## the Credential object to use for authentication info for the webrequest
+        $cred = Switch ($PSCmdlet.ParameterSetName) {
+            "ByCredential" {
+                $Credential
+                break
+            } ## end case
+            default {
+                ## hashtable for parameter for Get-Credential
+                $hshParamForGetCredential = @{Message = "Enter your Zerto credentials for '$ZertoServer'"}
+                ## if ZertoUser was provided, set that as value for UserName
+                if (-not [String]::IsNullOrEmpty($ZertoUser) ) {$hshParamForGetCredential["UserName"] = $ZertoUser}
+                ## get the credential using parameter splatting via the given hashtable
+                Get-Credential @hshParamForGetCredential
+            } ## end case
+        } ## end switch
 
         If ($cred -NE $null) {
             #Remove  our Zerto Version
@@ -2017,12 +2029,20 @@
         param(
             [Parameter(Mandatory=$true, HelpMessage = 'Zerto Server or ENV:\ZertoServer')] [string] $ZertoServer ,
             [Parameter(Mandatory=$false, HelpMessage = 'Zerto Server URL Port')] [string] $ZertoPort = 9669 ,
-            [Parameter(Mandatory=$false, HelpMessage  = 'User to connect to Zerto')] [string] $ZertoUser
+            [Parameter(Mandatory=$false, HelpMessage  = 'User to connect to Zerto')] [string] $ZertoUser,
+            [Parameter(Mandatory=$false, HelpMessage  = 'User name to connect to Zerto', ParameterSetName="ByUserName")] [string] $ZertoUser,
+            ## PSCredential to use for connecting to Zerto ZVM
+            [Parameter(HelpMessage  = 'User credentials to connect to Zerto', ParameterSetName="ByCredential")][System.Management.Automation.PSCredential]$Credential
         )
         
+        ## hashtable for parameter for Get-ZertoAuthToken
+        $hshParamForGetZertoAuthToken = @{ZertoServer = $ZertoServer; ZertoPort = $ZertoPort}
+        ## conditionally set parameters for Get-ZertoAuthToken
+        if ($PsCmdlet.ParameterSetName -eq "ByCredential") {$hshParamForGetZertoAuthToken["Credential"] = $Credential} else {$hshParamForGetZertoAuthToken["ZertoUser"] = $ZertoUser}
         Set-Item ENV:ZertoServer $ZertoServer
         Set-Item ENV:ZertoPort  $ZertoPort 
-        Set-Item ENV:ZertoToken ((Get-ZertoAuthToken -ZertoServer $ZertoServer -ZertoPort $ZertoPort -ZertoUser $ZertoUser) | ConvertTo-Json -Compress) 
+        ## get the Zerto auth token using parameter splatting via the given hashtable
+        Set-Item ENV:ZertoToken ((Get-ZertoAuthToken @hshParamForGetZertoAuthToken) | ConvertTo-Json -Compress)
         Set-Item ENV:ZertoVersion (Get-ZertoLocalSite).version
     }
 
